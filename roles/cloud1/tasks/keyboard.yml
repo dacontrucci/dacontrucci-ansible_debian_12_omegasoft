@@ -1,0 +1,22 @@
+- name: APT | Install keyboard-configuration
+  apt: 
+    name: [ 'keyboard-configuration' ]
+    state: latest
+    autoclean: yes
+    autoremove: yes
+    cache_valid_time: 3600 
+    update_cache_retries: 3
+
+- name: SISOP | Configure kayboard MODEL
+  lineinfile:
+    path: /etc/default/keyboard
+    backup: yes
+    regexp: '^XKBMODEL'
+    line: 'XKBMODEL="pc105"'
+
+- name: SISOP | Configure kayboard LAYOUT
+  lineinfile:
+    path: /etc/default/keyboard
+    backup: yes
+    regexp: '^XKBLAYOUT'
+    line: 'XKBLAYOUT="br"'

@@ -1,0 +1,15 @@
+*.retry
+
+*.sha1
+
+*.bz2
+
+*.zip
+
+*.gz
+
+*.war
+
+venv/
+
+.venv/

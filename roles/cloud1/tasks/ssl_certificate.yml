@@ -1,0 +1,12 @@
+- name: APT | Install python3-certbot
+  apt: 
+    name: [ 'keyboard-configuration' ]
+    state: latest
+    autoclean: yes
+    autoremove: yes
+    cache_valid_time: 3600 
+    update_cache_retries: 3
+
+- name: CERTBOT | Generate and configure SSL certificate for {{ app_name|lower }}.omegasoft.net.br .
+  command:
+    cmd: certbot -n -d{{ app_name|lower }}.omegasoft.net.br --nginx --agree-tos --email daniel.contrucci@omegasoft.net.br

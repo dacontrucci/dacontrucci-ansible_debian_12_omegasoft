@@ -1,0 +1,20 @@
+- name: UNOERP | Copy Backup Script File
+  copy:
+    src: backup/bkp.sh
+    dest: /root/crontab/
+    owner: root
+    group: root
+    mode: '700'
+    directory_mode: '700'
+    backup: yes
+
+- name: UNOERP | Add Backup Cronjob
+  cron:
+    name: "Backup Aplicacao {{ app_name|capitalize }}"
+    minute: "0"
+    hour: "22"
+    job: "/root/crontab/bkp.sh {{ app_name|lower }} > /dev/null"
+    cron_file: /etc/crontab
+    user: root
+    backup: yes
+

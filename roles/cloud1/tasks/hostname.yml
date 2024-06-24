@@ -1,0 +1,3 @@
+- name: Set the hostname as '{{ app_name|lower }}.omegasoft.net.br'
+  hostname:
+    name: '{{ app_name|lower }}.omegasoft.net.br'

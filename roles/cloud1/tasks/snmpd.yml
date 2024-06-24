@@ -1,0 +1,17 @@
+- name: APT | Install snmpd requirements
+  apt:
+    name: [ 'snmpd' ]
+    state: latest
+    autoclean: yes
+    autoremove: yes
+    cache_valid_time: 3600
+    update_cache_retries: 3
+
+- name: SISOP | Change snmpd configuration file
+  shell:
+    cmd: 'echo "rocommunity public 191.255.216.172" > /etc/snmp/snmpd.conf'
+
+- name: SISOP | Restart snmpd service
+  service:
+    name: snmpd
+    state: restarted

@@ -1,0 +1,9 @@
+- name: SYSOP | Copy APT sources.list File.
+  copy:
+    src: apt/sources.list
+    dest: /etc/apt/sources.list
+    owner: root
+    group: root
+    mode: '644'
+    directory_mode: '700'
+    backup: yes

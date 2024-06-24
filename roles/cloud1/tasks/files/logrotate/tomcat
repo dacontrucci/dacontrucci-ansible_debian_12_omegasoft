@@ -1,0 +1,29 @@
+/var/tomcat/logs/catalina.out {
+copytruncate
+su tomcat tomcat
+daily
+rotate 10
+compress
+missingok
+size 1M
+}
+
+/var/tomcat/logs/*.log {
+copytruncate
+su tomcat tomcat
+daily
+rotate 10
+compress
+missingok
+size 1M
+}
+
+/var/tomcat/logs/*.txt {
+copytruncate
+su tomcat tomcat
+daily
+rotate 10
+compress
+missingok
+size 1M
+}

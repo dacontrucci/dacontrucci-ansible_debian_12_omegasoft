@@ -1,0 +1,338 @@
+---
+
+- name: APT | Update Cache
+  apt: update_cache=yes
+
+- name: APT | Update System
+  apt: name="*" state=latest
+
+
+- name: APT | Install Requirements
+  apt: 
+    name: ['python3-minimal', 'software-properties-common', 'dirmngr', 'apt-transport-https', 'python3-mysqldb', 'python3-apt', 'python3-apt', 'debconf-utils', 'nginx', 'cups', 'cups-bsd', 'vim', 'sudo', 'python3-certbot-nginx', 'lbzip2', 'awscli', 'wget', 'ufw', 'ttf-mscorefonts-installer', 'mariadb-server']
+    state: latest
+
+- name: UNOERP | Copy custom my.cnf
+  copy:
+    src: my.cnf
+    dest: /etc/mysql/mariadb.conf.d/50-server.cnf
+
+- name: Create mariadb log directory
+  ansible.builtin.file:
+    path: /var/log/mysql
+    state: directory
+    mode: '0750'
+    owner: mysql
+    group: mysql
+
+- name: SISOP | Restart MariaDB
+  systemd:
+    name: mariadb 
+    state: restarted 
+    enabled: yes 
+    daemon_reload: yes
+
+
+- name: MySQL | Create app user and grant all privileges on DB
+  mysql_user:
+    name: '{{ app_name|lower }}'
+    password: '{{ app_name|lower|reverse + app_name|length|string }}'
+    priv: '{{ "db_uc_" + app_name|lower }}.*:ALL'
+    host: 'localhost'
+    login_user: root
+    login_password: ''
+    
+- name: MySQL | Create app (Desenv) user and grant all privileges on DB
+  mysql_user:
+    name: 'desenv'
+    password: 'vnesed6'
+    priv: 'db_uc_desenv.*:ALL'
+    host: 'localhost'
+    login_user: root
+    login_password: ''
+
+- name: MySQL | Create gsnfe user and grant all privileges on DB
+  mysql_user:
+    name: gsnfe
+    password: '#gsnfe!'
+    priv: '{{ "db_uc_" + app_name|lower + "_nfe" }}.*:ALL/db_uc_desenv_nfe.*:ALL'
+    host: 'localhost'
+    login_user: root
+    login_password: ''
+
+- name: MySQL | Create cep user and grant all privileges on DB
+  mysql_user:
+    name: cep
+    password: cep
+    priv: 'db_cep.*:ALL'
+    host: 'localhost'
+    login_user: root
+    login_password: ''
+
+- name: MySQL | Create unosol user and grant all privileges on DB
+  mysql_user:
+    name: unosol
+    password: '#prudencia5!'
+    priv: 'db_%.*:ALL'
+    host: '%'
+    login_user: root
+    login_password: ''
+
+#- name: MySQL | Update root password
+#  mysql_user:
+#    name: root
+#    password: '{{ root_password }}'
+#    priv: '*.*:ALL'
+#    host: '{{  item  }}'
+#    login_user: root
+#    login_password: ''
+#  with_items:
+#    - 127.0.0.1
+#    - ::1
+#    - localhost
+
+- name: UNOERP | Copy default database dump file
+  copy:
+    src: '{{  item  }}' 
+    dest: /tmp/unoerp/
+  with_items:
+    - db_uc_padrao.sql.bz2
+    - db_uc_padrao_nfe.sql.bz2
+    - db_cep.sql.bz2
+
+- name: MySQL | Import default database
+  mysql_db:
+    name: '{{  item  }}'
+    state: import
+    target: /tmp/unoerp/db_uc_padrao.sql.bz2
+    login_unix_socket: /run/mysqld/mysqld.sock
+    login_user: root
+    login_password: segreds
+  with_items:
+    - "{{ db_name }}"
+    - db_uc_desenv
+
+- name: MySQL | Import default nfe database
+  mysql_db:
+    name: '{{  item  }}'
+    state: import
+    target: /tmp/unoerp/db_uc_padrao_nfe.sql.bz2
+    login_unix_socket: /run/mysqld/mysqld.sock
+    login_user: root
+    login_password: '{{  root_password  }}'
+  with_items:
+    - "{{ db_name_nfe }}"
+    - db_uc_desenv_nfe
+
+- name: MySQL | Import default cep database
+  mysql_db:
+    name: db_cep
+    state: import
+    target: /tmp/unoerp/db_cep.sql.bz2
+    login_unix_socket: /run/mysqld/mysqld.sock
+    login_user: root
+    login_password: '{{  root_password  }}'
+
+- name: UNOERP | Create /usr/java directory
+  file:
+    state: directory
+    path: /usr/java
+    
+- name: UNOERP | Transfer and unarchive Java
+  unarchive:
+    copy: yes
+    src: server-jre-8u231-linux-x64.tar.gz
+    dest: /usr/java/
+
+- name: UNOERP | Create /usr/java/jdk symlink
+  file:
+    state: link
+    src: /usr/java/jdk1.8.0_231
+    path: /usr/java/jdk
+
+
+- name: UNOERP | Create tomcat group
+  group:
+    name: tomcat
+    state: present
+
+- name: UNOERP | Create tomcat system user
+  user:
+    name: tomcat
+    group: tomcat
+    groups: lpadmin
+    state: present
+    create_home: no
+    home: /var/tomcat
+    shell: /bin/false
+
+- name: UNOERP | Transfer and unarchive Tomcat 8 file
+  unarchive:
+    copy: yes
+    src: apache-tomcat-8.0.35.tar.bz2 
+    dest: /var/
+
+- name: UNOERP | Create /var/tomcat symlink
+  file:
+    state: link
+    src: /var/apache-tomcat-8.0.35
+    path: /var/tomcat
+
+- name: UNOERP | Create app default directory
+  file:
+    state: directory
+    path: /var/tomcat/webapps/UCOMMERCE/{{ app_name|capitalize }}/properties/mdao
+
+- name: UNOERP | Create mdao properties for app data 
+  template:
+    src: dbempresa.properties.j2
+    dest: /var/tomcat/webapps/UCOMMERCE/{{ app_name|capitalize }}/properties/mdao/dbempresa.properties
+
+- name: UNOERP | Create mdao properties for app nfe database
+  template:
+    src: dbnfe.properties.j2
+    dest: /var/tomcat/webapps/UCOMMERCE/{{ app_name|capitalize }}/properties/mdao/dbnfe.properties
+
+- name: UNOERP | Create mdao properties for app cep database
+  template:
+    src: dbcep.properties.j2
+    dest: /var/tomcat/webapps/UCOMMERCE/{{ app_name|capitalize }}/properties/mdao/dbcep.properties
+    
+- name: UNOERP | Create app (Desenv) default directory
+  file:
+    state: directory
+    path: /var/tomcat/webapps/UCOMMERCE/Desenv/properties/mdao
+
+- name: UNOERP | Create mdao properties for app (Desenv) data 
+  template:
+    src: dbempresa.properties.desenv.j2
+    dest: /var/tomcat/webapps/UCOMMERCE/Desenv/properties/mdao/dbempresa.properties
+
+- name: UNOERP | Create mdao properties for app nfe (Desenv) database
+  template:
+    src: dbnfe.properties.desenv.j2
+    dest: /var/tomcat/webapps/UCOMMERCE/Desenv/properties/mdao/dbnfe.properties
+
+- name: UNOERP | Create mdao properties for app cep database
+  template:
+    src: dbcep.properties.j2
+    dest: /var/tomcat/webapps/UCOMMERCE/Desenv/properties/mdao/dbcep.properties    
+
+ 
+
+- name: SISOP | Adjust tomcat permission
+  shell:
+    chdir: /var/tomcat
+    cmd: chown tomcat:tomcat . --dereference -HL -R && find . -type d -exec chmod 2770 {} \+ && find . -type f -exec chmod 660 {} \+ && chmod 770 /var/tomcat/bin/*.sh
+    executable: /bin/bash
+
+
+    ###Tomcat Service
+
+- name: SISOP | Transfer tomcat service file
+  copy:
+    src: tomcat.service
+    dest: /lib/systemd/system/
+
+- name: UNOERP | Deploy defaul app war file
+  copy:
+    src: unoerp.war
+    dest: /var/tomcat/webapps/{{  app_name|capitalize  }}.war
+    owner: tomcat
+    group: tomcat
+    mode: '660'
+
+- name: SISOP | System enable and start tomcat service
+  systemd:
+    name: tomcat
+    daemon_reload: yes
+    enabled: yes
+    state: started
+
+- name: NGINX | Copy nginx.conf file
+  copy:
+    src: nginx/nginx.conf
+    dest: /etc/nginx/nginx.conf
+    owner: root
+    group: root
+    mode: '660'
+ 
+- name: NGINX | Create defalut nginx file
+  template:
+    src: nginx/default.j2
+    dest: /etc/nginx/sites-available/default
+    mode: '660'
+    
+- name: NGINX | Enable default site configuration
+  file:
+    state: link
+    src: /etc/nginx/sites-available/default
+    path: /etc/nginx/sites-enabled/default
+
+- name: NGINX | System enable and restart Nginx
+  systemd:
+    name: nginx
+    daemon_reload: yes
+    enabled: yes
+    state: restarted
+    
+- name: SISOP | Add unosol user
+  user:
+    name: unosol
+    append: yes
+    groups: tomcat,lpadmin
+    shell: /bin/bash
+    password: '$6$nlT9lIEZaf7sJ6/V$F45DQdFogHoqwOtJUTt3b5Typkp9xDX/ED/UeVSsxeGMBARw2pVRw8zCsgkrdHrPZhHDAwdSNQcCsDFoq4Rpj.'
+
+- name: UNOERP | Creates /home/unosol/scripts_nfe folder
+  file:
+    state: directory
+    path: /home/unosol/scripts_nfe
+    mode: '2700'
+    owner: unosol
+    group: unosol
+
+- name: SISOP | Enable ssh password authentication for regular users
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    backup: yes
+    regexp: 'PasswordAuthentication'
+    line: 'PasswordAuthentication yes'
+      #    validate: 'sshd -t -f %s'
+
+- name: SISOP | Allow keyonly root authentication
+  lineinfile:
+    path: /etc/ssh/sshd_config
+    backup: yes
+    regexp: 'PermitRootLogin yes'
+    line: 'PermitRootLogin no'
+      #    validate: 'sshd -t -f %s'
+    
+- name: SISOP | System enable and restart SSH
+  systemd:
+    name: ssh
+    daemon_reload: yes
+    enabled: yes
+    state: restarted
+
+- name: SISOP | Create alias to display UNOERP logs
+  lineinfile:
+    path: /etc/profile
+    backup: yes
+    regexp: "alias log"
+    line: "\nalias log='tail -f /var/tomcat/logs/catalina.out'"
+
+- name: SISOP | Disable IPv6
+  sysctl:
+    name: net.ipv6.conf.all.disable_ipv6
+    value: "1"
+    sysctl_set: yes
+    reload: yes
+
+- name: SISOP | Change root password
+  user:
+    name: root
+    password: '$6$pD/zmYVY$u7Aonps9dKrx3gEAIDDZ6.JoLCnQdVkaxbgt/V7t/g.F77sefqj5K2Pnp5q6suWE/sisu4noTHeceAqsrYMRj.'
+    update_password: always
+
+...

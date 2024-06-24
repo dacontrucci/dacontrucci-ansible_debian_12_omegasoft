@@ -1,0 +1,7 @@
+DBEmpresas.dataBaseName=DBEmpresas
+DBEmpresas.dataSourceName={{ app_name|capitalize }}
+DBEmpresas.dataBaseSysName=MySQL
+DBEmpresas.driverName=com.mysql.jdbc.Driver
+DBEmpresas.urlSource=jdbc:mysql://localhost/{{  'db_uc_' + app_name|lower  }}?useSSL=false&allowPublicKeyRetrieval=true&autoReconnect=true
+DBEmpresas.userName={{ app_name|lower }}
+DBEmpresas.password={{ app_name|reverse + app_name|length|string }}

@@ -1,0 +1,19 @@
+- name: APT | Install fail2ban requirements
+  apt:
+    name: [ 'fail2ban' ]
+    state: latest
+    autoclean: yes
+    autoremove: yes
+    cache_valid_time: 3600
+    update_cache_retries: 3
+
+- name: SISOP | Copy custom jaild configuration file
+  copy:
+    src: fail2ban/jail.local
+    dest: /etc/fail2ban/jail.local
+    mode: '600'
+
+- name: SISOP | Restart fail2ban service
+  service:
+    name: fail2ban
+    state: restarted

@@ -1,0 +1,61 @@
+- name: APT | Install nagios nrpe requirements
+  apt:
+    name: [ 'nagios-nrpe-server', 'nagios-plugins', 'cron-apt' ]
+    state: latest
+    autoclean: yes
+    autoremove: yes
+    cache_valid_time: 3600
+    update_cache_retries: 3
+
+- name: SISOP | Change nrpe allowed hosts
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    regexp: '^allowed_hosts=127.0.0.1'
+    line: "allowed_hosts=127.0.0.1, 191.255.216.172"
+
+- name: SISOP | Add check_swap
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    regexp: '^command\[check_swap\]'
+    line: "command[check_swap]=/usr/lib/nagios/plugins/check_swap -w 20 -c 10"
+
+- name: SISOP | Add check_apt
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    regexp: '^command\[check_apt\]'
+    line: "command[check_apt]=/usr/lib/nagios/plugins/check_apt"
+
+- name: SISOP | Change check_load
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    regexp: '^command\[check_load\]'
+    line: "command[check_load]=/usr/lib/nagios/plugins/check_load -r -w 1.00,.95,.90 -c 1.50,1.45,1.40"
+
+- name: SISOP | Add check_file_age
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    regexp: '^command\[check_file_age\]'
+    line: "command[check_file_age]=/usr/lib/nagios/plugins/check_file_age -w 86400 -c 88200 -f /var/spool/.backup/.BACKUP_SUCCESS_AWS"
+    
+- name: SISOP | Add check_file_age
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    line: "command[check_file_age_mysql_inc]=/usr/lib/nagios/plugins/check_file_age -w 3630 -c 3660 -f /var/spool/.backup/.BACKUP_SUCCESS_AWS_BKP_INC_MYSQL"
+    
+- name: SISOP | Change check_hda
+  lineinfile:
+    path: /etc/nagios/nrpe.cfg
+    backup: yes
+    regexp: '^command\[check_hda1\]'
+    line: "command[check_sda1]=/usr/lib/nagios/plugins/check_disk -w 20% -c 10% -p /"
+
+- name: SISOP | Restart nrpe service
+  service:
+    name: nagios-nrpe-server
+    state: restarted

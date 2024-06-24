@@ -1,0 +1,1582 @@
+SET GLOBAL log_bin_trust_function_creators = 1; 
+
+DROP FUNCTION IF EXISTS atualizaCcusto;
+DROP FUNCTION IF EXISTS calcularJurosPagar;
+DROP FUNCTION IF EXISTS getDtVencimentoFeriado;
+DROP FUNCTION IF EXISTS getSaldoContasPagarFornecedor;
+DROP FUNCTION IF EXISTS getSaldoContasPagarFornecedoresPeriodo;
+DROP FUNCTION IF EXISTS getValorBaixaContasPagar;
+DROP FUNCTION IF EXISTS calcularJurosReceber;
+DROP FUNCTION IF EXISTS getSaldoContasReceberCliente;
+DROP FUNCTION IF EXISTS getSaldoContasReceberClientesPeriodo;
+DROP FUNCTION IF EXISTS SOMA_EMAILS_PEDIDO;
+DROP FUNCTION IF EXISTS getValorBaixaContasReceber;
+DROP FUNCTION IF EXISTS getBaixaTituloContasPagar;
+DROP FUNCTION IF EXISTS getBaixaTituloContasReceber;
+DROP FUNCTION IF EXISTS getVlCotacao;
+DROP FUNCTION IF EXISTS statusEstoqueProduto;
+DROP FUNCTION IF EXISTS listarNFPedidoCompra;
+DROP FUNCTION IF EXISTS getNrBoleto;
+
+delimiter //
+
+CREATE FUNCTION getSaldoContasReceberCliente( codEmpresa integer, codCliente integer , pDTReferencia char(10) ) returns decimal(17,2) 
+BEGIN
+		declare  vlSaldo               decimal(17,2);
+
+        select   sum( calcularJurosReceber(tipa.cod_empresa,tipa.cod_titulo,tipa.cod_parcela, serie ,cast(pDTReferencia as date) , '1' ) 
+        ) as 'credito' 
+        into 
+             vlSaldo       
+        from 
+             fn_titulo_receber tipa 
+        where         
+             tipa.situacao between 10 and 30               
+             and
+             tipa.dt_implant    <  pDTReferencia
+             and  
+             tipa.cod_empresa    = codEmpresa    
+             and 
+             tipa.cod_cliente    = codCliente
+             and                        
+            (
+             ( 
+             tipa.vl_total_titulo - 
+             		(     ifnull(  tipa.vl_iss , 0 ) 
+                    	+ ifnull( tipa.vl_ir,0) 
+                        + ifnull( tipa.vl_pis, 0 ) 
+                        + ifnull( tipa.vl_cofins , 0 ) 
+                        + ifnull( tipa.vl_cs , 0 ) 
+                    )
+              )  -  
+               CASE WHEN 
+                           ( 
+    					     select sum(ifnull(hist.vl_baixa,0)) 
+    					     from fn_titulo_receber_hist as hist 
+    					     where 
+    					           hist.cod_empresa     = tipa.cod_empresa 
+    					           and 
+    					           hist.cod_titulo      = tipa.cod_titulo 
+    					           and 
+    					           hist.cod_parcela     = tipa.cod_parcela 
+    					           and 
+    					           hist.serie           = tipa.serie 
+    					           and 
+    					           hist.tp_hist         = 30 
+    					           and 
+    					           cast(hist.dt_referencia as date ) <= cast( pDTReferencia as date ) 
+                            ) 
+                            IS NULL 
+                   THEN 
+                             0.0 
+                   ELSE 
+                           ( 
+    					     select sum(ifnull(hist.vl_baixa,0)) 
+    					     from fn_titulo_receber_hist as hist 
+    					     where 
+    					           hist.cod_empresa     = tipa.cod_empresa 
+    					           and 
+    					           hist.cod_titulo      = tipa.cod_titulo 
+    					           and 
+    					           hist.cod_parcela     = tipa.cod_parcela 
+    					           and 
+    					           hist.serie           = tipa.serie 
+    					           and 
+    					           hist.tp_hist         = 30 
+    					           and 
+    					           cast( hist.dt_referencia as date ) <= cast(  pDTReferencia as date ) 
+                           ) 
+                  END
+            
+                 ) > 0                
+             
+             ;            
+
+        IF ( vlSaldo IS NULL ) THEN         
+           return 0.0;           
+        END IF;
+
+        return vlSaldo;
+end
+//
+CREATE FUNCTION getSaldoContasReceberClientesPeriodo( codEmpresa integer,  pDTReferencia char(10) , pDataFinal char(19)) returns decimal(17,2) 
+BEGIN
+        declare  done                                INT DEFAULT 0;
+		declare vlSaldo                              decimal(17,2);
+        declare pCliente                             integer;        
+        declare vlSaldoTotal                         decimal(17,2);
+
+        DECLARE curClientes CURSOR FOR
+                                    select
+                                           distinct tipaPeriodo.cod_cliente 
+                                    from
+                                        fn_titulo_receber tipaPeriodo                                     
+                                        LEFT OUTER JOIN fn_titulo_receber_hist as hist
+                                    	ON
+                                                hist.cod_empresa     = tipaPeriodo.cod_empresa
+                                    	        and
+                                    	        hist.cod_titulo      = tipaPeriodo.cod_titulo
+                                    	        and
+                                    	        hist.cod_parcela     = tipaPeriodo.cod_parcela                             
+                                    	        and
+                                    	        hist.serie           = tipaPeriodo.serie
+                                    where
+                                    	tipaPeriodo.cod_empresa      = codEmpresa
+                                        and                                                
+                                        (                                                
+                                              (
+                                                    hist.dt_referencia between pDTReferencia and pDataFinal
+                                                    and
+                                                    hist.tp_hist = 30
+                                              )    
+                                              or                                                      
+                                              (                                                                                                            
+                                                    tipaPeriodo.dt_implant between pDTReferencia and pDataFinal
+                                                    and
+                                                    tipaPeriodo.situacao between 10 and 30
+                                              )
+                                        );
+
+        declare CONTINUE HANDLER FOR NOT FOUND SET   done = 1;
+
+        
+        set vlSaldoTotal = 0;
+         
+        OPEN curClientes;
+
+        read_loop: LOOP
+                   FETCH curClientes INTO pCliente;
+  
+                -- Verifica se o loop deverá ser terminado
+                IF done THEN
+                  LEAVE read_loop;
+                END IF;                
+
+
+                select   sum( calcularJurosReceber(tipa.cod_empresa,tipa.cod_titulo,tipa.cod_parcela,tipa.serie,cast(pDTReferencia as date) , '1' ) 
+                ) as 'credito' 
+                into 
+                     vlSaldo       
+                from 
+                     fn_titulo_receber tipa 
+                where         
+                     tipa.situacao between 10 and 30               
+                     and
+                     tipa.dt_implant    <  pDTReferencia
+                     and  
+                     tipa.cod_empresa    = codEmpresa    
+                     and 
+                     cod_cliente        = pCliente
+                     and                        
+                    (
+                     ( 
+                     tipa.vl_total_titulo - 
+                     		(     ifnull(  tipa.vl_iss , 0 ) 
+                            	+ ifnull( tipa.vl_ir,0) 
+                                + ifnull( tipa.vl_pis, 0 ) 
+                                + ifnull( tipa.vl_cofins , 0 ) 
+                                + ifnull( tipa.vl_cs , 0 ) 
+                            )
+                      )  -  
+                       CASE WHEN 
+                                   ( 
+            					     select sum(ifnull(hist.vl_baixa,0)) 
+            					     from fn_titulo_receber_hist as hist 
+            					     where 
+            					           hist.cod_empresa     = tipa.cod_empresa 
+            					           and 
+            					           hist.cod_titulo      = tipa.cod_titulo 
+            					           and 
+            					           hist.cod_parcela     = tipa.cod_parcela 
+            					           and 
+            					           hist.serie           = tipa.serie 
+            					           and 
+            					           hist.tp_hist = 30 
+            					           and 
+            					           cast(hist.dt_referencia as date ) <= cast( pDTReferencia as date ) 
+                                    ) 
+                                    IS NULL 
+                           THEN 
+                                     0.0 
+                           ELSE 
+                                   ( 
+            					     select sum(ifnull(hist.vl_baixa,0)) 
+            					     from fn_titulo_receber_hist as hist 
+            					     where 
+            					           hist.cod_empresa     = tipa.cod_empresa 
+            					           and 
+            					           hist.cod_titulo      = tipa.cod_titulo 
+            					           and 
+            					           hist.cod_parcela     = tipa.cod_parcela             					         
+            					           and 
+            					           hist.serie           = tipa.serie 
+            					           and 
+            					           hist.tp_hist = 30 
+            					           and 
+            					           cast( hist.dt_referencia as date ) <= cast(  pDTReferencia as date ) 
+                                   ) 
+                          END
+                    
+                         ) > 0                
+                     
+                     ;            
+        
+                IF ( vlSaldo IS NULL ) THEN         
+                   set vlSaldo = 0.0;           
+                END IF;
+
+                SET vlSaldoTotal = vlSaldoTotal + vlSaldo;
+ 
+        END LOOP;
+
+
+        CLOSE curClientes;
+        return vlSaldoTotal;
+end
+//
+CREATE FUNCTION getValorBaixaContasReceber( codEmpresa integer, pCodTitulo integer, pCodParcela integer , pSerie char(5) ,  pDTReferencia date ) returns decimal(17,2) 
+BEGIN
+		declare  vlBaixa               decimal(17,2);
+
+        select 
+               sum( 
+                   CASE WHEN 
+                               ( 
+        					     select sum(ifnull(hist.vl_baixa,0)) 
+        					     from fn_titulo_receber_hist as hist 
+        					     where 
+        					           hist.cod_empresa     = tipa.cod_empresa 
+        					           and 
+        					           hist.cod_titulo      = tipa.cod_titulo 
+        					           and 
+        					           hist.cod_parcela     = tipa.cod_parcela 
+        					           and 
+        					           hist.serie           = tipa.serie 
+        					           and 
+        					           hist.tp_hist = 30 
+        					           and 
+        					           cast(hist.dt_referencia as date ) <= cast( pDTReferencia as date ) 
+                                ) 
+                                IS NULL 
+                       THEN 
+                                 0.0 
+                       ELSE 
+                               ( 
+        					     select sum(ifnull(hist.vl_baixa,0)) 
+        					     from fn_titulo_receber_hist as hist 
+        					     where 
+        					           hist.cod_empresa     = tipa.cod_empresa 
+        					           and 
+        					           hist.cod_titulo      = tipa.cod_titulo 
+        					           and 
+        					           hist.cod_parcela     = tipa.cod_parcela 
+        					           and 
+        					           hist.serie  			= tipa.serie
+        					           and 
+        					           hist.tp_hist = 30 
+        					           and 
+        					           cast( hist.dt_referencia as date ) <= cast(  pDTReferencia as date ) 
+                               ) 
+                  END
+            )     as 'valorBaixa' 
+        into 
+             vlBaixa
+        from 
+             fn_titulo_receber tipa 
+        where         
+             tipa.situacao between 10 and 30               
+             and
+             tipa.dt_vencimento <  pDTReferencia
+             and  
+             tipa.cod_empresa    = codEmpresa    
+             and 
+             tipa.cod_titulo     = pCodTitulo
+             and 
+             tipa.cod_parcela    = pCodParcela
+             and
+             tipa.serie 		 = pSerie;
+
+        IF ( vlBaixa IS NULL ) THEN         
+           return 0.0;           
+        END IF;
+
+        return vlBaixa;
+end
+//
+
+CREATE FUNCTION getDtVencimentoFeriado( dtVencimento date ) returns date
+DETERMINISTIC
+
+BEGIN
+		declare retorno date;
+        declare feriado date;
+        declare exitLoop int;        
+
+        set retorno = dtVencimento;
+        set exitLoop = 1;
+        -- Verifica se a data de vencimento é um dia útil.
+        WHILE ( exitLoop = 1 )
+        DO
+    	    select dt_feriado 
+            into feriado 
+            from cd_feriado 
+            where 
+                  dt_feriado between cast(concat(cast(DATE_FORMAT(retorno, '%Y-%m-%d') as char),' 00:00:00') as date) 
+                                     and 
+                                     cast(concat(cast(DATE_FORMAT(retorno, '%Y-%m-%d') as char),' 23:59:59') as date);
+            -- Verifica se a data é dia útil
+    		IF( feriado is not null or WEEKDAY(retorno) > 4) THEN                 
+                 set retorno = DATE_ADD(retorno, INTERVAL 1 DAY);                 
+                 set feriado = null;
+            ELSE            
+                set exitLoop = 0;          
+                set feriado  = null;
+            END IF;            
+            
+        END WHILE;
+		return retorno;
+END
+//
+CREATE FUNCTION getSaldoContasPagarFornecedor( codEmpresa integer, codFornecedor integer , pDTReferencia char(10) ) returns decimal(17,2) 
+BEGIN
+		declare  vlSaldo               decimal(17,2);
+
+        select   sum( calcularJurosPagar(tipa.cod_empresa,tipa.cod_titulo,tipa.cod_parcela,tipa.cod_fornecedor,tipa.cod_especie,cast(pDTReferencia as date) , '1' ) 
+        ) as 'credito' 
+        into 
+             vlSaldo       
+        from 
+             fn_titulo_pagar tipa 
+        where         
+             tipa.situacao between 10 and 30               
+             and
+             tipa.dt_implant    <  pDTReferencia
+             and  
+             tipa.cod_empresa    = codEmpresa    
+             and 
+             tipa.cod_fornecedor = codFornecedor
+             and                        
+            (
+             ( 
+             tipa.vl_total_titulo - 
+             		(     ifnull(  tipa.vl_iss , 0 ) 
+                    	+ ifnull( tipa.vl_ir,0) 
+                        + ifnull( tipa.vl_pis, 0 ) 
+                        + ifnull( tipa.vl_cofins , 0 ) 
+                        + ifnull( tipa.vl_cs , 0 ) 
+                    )
+              )  -  
+               CASE WHEN 
+                           ( 
+    					     select sum(ifnull(hist.vl_baixa,0)) 
+    					     from fn_titulo_pagar_hist as hist 
+    					     where 
+    					           hist.cod_empresa     = tipa.cod_empresa 
+    					           and 
+    					           hist.cod_titulo      = tipa.cod_titulo 
+    					           and 
+    					           hist.cod_parcela     = tipa.cod_parcela 
+    					           and 
+    					           hist.cod_fornecedor  = tipa.cod_fornecedor 
+    					           and 
+    					           hist.cod_especie     = tipa.cod_especie 
+    					           and 
+    					           hist.tp_hist = 30 
+    					           and 
+    					           cast(hist.dt_referencia as date ) <= cast( pDTReferencia as date ) 
+                            ) 
+                            IS NULL 
+                   THEN 
+                             0.0 
+                   ELSE 
+                           ( 
+    					     select sum(ifnull(hist.vl_baixa,0)) 
+    					     from fn_titulo_pagar_hist as hist 
+    					     where 
+    					           hist.cod_empresa     = tipa.cod_empresa 
+    					           and 
+    					           hist.cod_titulo      = tipa.cod_titulo 
+    					           and 
+    					           hist.cod_parcela     = tipa.cod_parcela 
+    					           and 
+    					           hist.cod_fornecedor  = tipa.cod_fornecedor 
+    					           and 
+    					           hist.cod_especie     = tipa.cod_especie 
+    					           and 
+    					           hist.tp_hist = 30 
+    					           and 
+    					           cast( hist.dt_referencia as date ) <= cast(  pDTReferencia as date ) 
+                           ) 
+                  END
+            
+                 ) > 0                
+             
+             ;            
+
+        IF ( vlSaldo IS NULL ) THEN         
+           return 0.0;           
+        END IF;
+
+        return vlSaldo;
+end
+//
+CREATE FUNCTION getSaldoContasPagarFornecedoresPeriodo( codEmpresa integer,  pDTReferencia char(10) , pDataFinal char(19)) returns decimal(17,2) 
+BEGIN
+        declare  done                                INT DEFAULT 0;
+		declare vlSaldo                              decimal(17,2);
+        declare pFornecedor                          integer;        
+        declare vlSaldoTotal                         decimal(17,2);
+
+        DECLARE curFornecedores CURSOR FOR
+                                    select
+                                           distinct tipaPeriodo.cod_fornecedor 
+                                    from
+                                        fn_titulo_pagar tipaPeriodo
+                                        LEFT OUTER JOIN fn_titulo_pagar_hist as hist
+                                    	ON
+                                                hist.cod_empresa     = tipaPeriodo.cod_empresa
+                                    	        and
+                                    	        hist.cod_titulo      = tipaPeriodo.cod_titulo
+                                    	        and
+                                    	        hist.cod_parcela     = tipaPeriodo.cod_parcela
+                                    	        and
+                                    	        hist.cod_fornecedor  = tipaPeriodo.cod_fornecedor
+                                    	        and
+                                    	        hist.cod_especie     = tipaPeriodo.cod_especie
+                                    where
+                                    	tipaPeriodo.cod_empresa      = codEmpresa
+                                        and                                                
+                                        (                                                
+                                              (
+                                                    hist.dt_referencia between pDTReferencia and pDataFinal
+                                                    and
+                                                    hist.tp_hist = 30
+                                              )    
+                                              or                                                      
+                                              (                                                                                                            
+                                                    tipaPeriodo.dt_implant between pDTReferencia and pDataFinal
+                                                    and
+                                                    tipaPeriodo.situacao between 10 and 30
+                                              )
+                                        );
+
+        declare CONTINUE HANDLER FOR NOT FOUND SET   done = 1;
+
+        
+        set vlSaldoTotal = 0;
+         
+        OPEN curFornecedores;
+
+        read_loop: LOOP
+                   FETCH curFornecedores INTO pFornecedor;
+  
+                -- Verifica se o loop deverá ser terminado
+                IF done THEN
+                  LEAVE read_loop;
+                END IF;                
+
+
+                select   sum( calcularJurosPagar(tipa.cod_empresa,tipa.cod_titulo,tipa.cod_parcela,tipa.cod_fornecedor,tipa.cod_especie,cast(pDTReferencia as date) , '1' ) 
+                ) as 'credito' 
+                into 
+                     vlSaldo       
+                from 
+                     fn_titulo_pagar tipa 
+                where         
+                     tipa.situacao between 10 and 30               
+                     and
+                     tipa.dt_implant    <  pDTReferencia
+                     and  
+                     tipa.cod_empresa    = codEmpresa    
+                     and 
+                     cod_fornecedor = pFornecedor
+                     and                        
+                    (
+                     ( 
+                     tipa.vl_total_titulo - 
+                     		(     ifnull(  tipa.vl_iss , 0 ) 
+                            	+ ifnull( tipa.vl_ir,0) 
+                                + ifnull( tipa.vl_pis, 0 ) 
+                                + ifnull( tipa.vl_cofins , 0 ) 
+                                + ifnull( tipa.vl_cs , 0 ) 
+                            )
+                      )  -  
+                       CASE WHEN 
+                                   ( 
+            					     select sum(ifnull(hist.vl_baixa,0)) 
+            					     from fn_titulo_pagar_hist as hist 
+            					     where 
+            					           hist.cod_empresa     = tipa.cod_empresa 
+            					           and 
+            					           hist.cod_titulo      = tipa.cod_titulo 
+            					           and 
+            					           hist.cod_parcela     = tipa.cod_parcela 
+            					           and 
+            					           hist.cod_fornecedor  = tipa.cod_fornecedor 
+            					           and 
+            					           hist.cod_especie     = tipa.cod_especie 
+            					           and 
+            					           hist.tp_hist = 30 
+            					           and 
+            					           cast(hist.dt_referencia as date ) <= cast( pDTReferencia as date ) 
+                                    ) 
+                                    IS NULL 
+                           THEN 
+                                     0.0 
+                           ELSE 
+                                   ( 
+            					     select sum(ifnull(hist.vl_baixa,0)) 
+            					     from fn_titulo_pagar_hist as hist 
+            					     where 
+            					           hist.cod_empresa     = tipa.cod_empresa 
+            					           and 
+            					           hist.cod_titulo      = tipa.cod_titulo 
+            					           and 
+            					           hist.cod_parcela     = tipa.cod_parcela 
+            					           and 
+            					           hist.cod_fornecedor  = tipa.cod_fornecedor 
+            					           and 
+            					           hist.cod_especie     = tipa.cod_especie 
+            					           and 
+            					           hist.tp_hist = 30 
+            					           and 
+            					           cast( hist.dt_referencia as date ) <= cast(  pDTReferencia as date ) 
+                                   ) 
+                          END
+                    
+                         ) > 0                
+                     
+                     ;            
+        
+                IF ( vlSaldo IS NULL ) THEN         
+                   set vlSaldo = 0.0;           
+                END IF;
+
+                SET vlSaldoTotal = vlSaldoTotal + vlSaldo;
+ 
+        END LOOP;
+
+
+        CLOSE curFornecedores;
+        return vlSaldoTotal;
+end
+//
+CREATE FUNCTION getValorBaixaContasPagar( codEmpresa integer, pCodTitulo integer, pCodParcela integer , pCodFornecedor integer , pCodEspecie integer, pDTReferencia char(10) ) returns decimal(17,2) 
+BEGIN
+		declare  vlBaixa               decimal(17,2);
+
+        select 
+               sum( 
+                   CASE WHEN 
+                               ( 
+        					     select sum(ifnull(hist.vl_baixa,0)) 
+        					     from fn_titulo_pagar_hist as hist 
+        					     where 
+        					           hist.cod_empresa     = tipa.cod_empresa 
+        					           and 
+        					           hist.cod_titulo      = tipa.cod_titulo 
+        					           and 
+        					           hist.cod_parcela     = tipa.cod_parcela 
+        					           and 
+        					           hist.cod_fornecedor  = tipa.cod_fornecedor 
+        					           and 
+        					           hist.cod_especie     = tipa.cod_especie 
+        					           and 
+        					           hist.tp_hist = 30 
+        					           and 
+        					           cast(hist.dt_referencia as date ) <= cast( pDTReferencia as date ) 
+                                ) 
+                                IS NULL 
+                       THEN 
+                                 0.0 
+                       ELSE 
+                               ( 
+        					     select sum(ifnull(hist.vl_baixa,0)) 
+        					     from fn_titulo_pagar_hist as hist 
+        					     where 
+        					           hist.cod_empresa     = tipa.cod_empresa 
+        					           and 
+        					           hist.cod_titulo      = tipa.cod_titulo 
+        					           and 
+        					           hist.cod_parcela     = tipa.cod_parcela 
+        					           and 
+        					           hist.cod_fornecedor  = tipa.cod_fornecedor 
+        					           and 
+        					           hist.cod_especie     = tipa.cod_especie 
+        					           and 
+        					           hist.tp_hist = 30 
+        					           and 
+        					           cast( hist.dt_referencia as date ) <= cast(  pDTReferencia as date ) 
+                               ) 
+                  END
+            )     as 'valorBaixa' 
+        into 
+             vlBaixa
+        from 
+             fn_titulo_pagar tipa 
+        where         
+             tipa.situacao between 10 and 30               
+             and
+             tipa.dt_vencimento <  pDTReferencia
+             and  
+             tipa.cod_empresa    = codEmpresa    
+             and 
+             tipa.cod_titulo     = pCodTitulo
+             and 
+             tipa.cod_parcela    = pCodParcela
+             and
+             tipa.cod_fornecedor = pCodFornecedor 
+             and
+             tipa.cod_especie    = pCodEspecie;
+
+        IF ( vlBaixa IS NULL ) THEN         
+           return 0.0;           
+        END IF;
+
+        return vlBaixa;
+end
+//
+
+CREATE FUNCTION SOMA_EMAILS_PEDIDO(dataInicio CHAR(19), dataFim CHAR(19), codColaborador integer)
+  RETURNS NUMERIC
+   BEGIN
+        DECLARE VALOR_TOTAL NUMERIC(17,2);
+        select sum( valorPedido )         
+        INTO VALOR_TOTAL
+        from 
+        (  
+               select
+                    pedi.cod_pedido , SUM( distinct pedi.vl_total_produtos) as valorPedido
+               from 
+                    vd_pedido                  pedi
+                    inner join vd_pedido_hist  hist
+                    on 
+                          hist.cod_pedido = pedi.cod_pedido 
+                          and 
+                          hist.cod_empresa = pedi.cod_empresa 
+                          and 
+                          tp_historico = 35  
+                          and 
+                          dt_implant between dataInicio and dataFim 
+               where 
+                    pedi.cod_colaborador = codColaborador          
+               group by        
+                     pedi.cod_pedido
+        ) as total;
+    RETURN ifnull(VALOR_TOTAL,0);
+   END
+//
+
+DELIMITER ;
+
+DROP PROCEDURE IF EXISTS calculaEstoque;
+DELIMITER $$
+CREATE PROCEDURE calculaEstoque(deposito1 INTEGER, deposito2 INTEGER, deposito3 INTEGER, deposito4 INTEGER, empresa1 INTEGER, empresa2 INTEGER, empresa3 INTEGER )
+BEGIN
+	 -- Definição de variáveis utilizadas na Procedure
+	DECLARE existe_mais_linhas INTEGER DEFAULT 0;
+	DECLARE vCD_PRODUTO VARCHAR(30) DEFAULT '';
+	DECLARE vCD_PRODUTO_ANT VARCHAR(30) DEFAULT '';
+	DECLARE vID_SKU 	  INTEGER	DEFAULT 0;
+	DECLARE vSALDO 			DOUBLE	DEFAULT 0.0000;
+	DECLARE vSALDO_ANT  DOUBLE  DEFAULT 0.0000;
+
+	-- Definição do cursor
+	DECLARE cursorEstoque CURSOR FOR
+			select
+				cd_produto.cod_produto as codProduto,
+				cd_produto.cod_produto_ecommerce as idSKU,	
+				case when demanda is null
+					then IFNULL(estoque,0.0)
+					else IFNULL(estoque,0.0) - IFNULL(demanda,0.0)
+				end as saldo
+			from
+			cd_produto
+			left outer join 
+			(
+				select
+					eq_saldo.cod_produto ,
+					sum(eq_saldo.saldo_estoque)  as estoque ,
+					(SELECT
+							sum(
+									case when sg_colaborador.cod_deposito is null or length(sg_colaborador.cod_deposito) = 0 or trim(sg_colaborador.cod_deposito) = '0'
+											then vd_pedido_item_aberto.qtd
+											else 0
+									end) as demanda
+						FROM
+							vd_pedido_item_aberto
+							inner join vd_pedido
+							on 
+									vd_pedido_item_aberto.cod_empresa = vd_pedido.cod_empresa
+									and 
+									vd_pedido_item_aberto.cod_pedido = vd_pedido.cod_pedido
+									and
+									vd_pedido_item_aberto.cod_empresa IN ( empresa1, empresa2, empresa3 )
+									and 
+									vd_pedido.situacao >= 10
+									and 
+									vd_pedido.situacao < 200 
+							inner join cd_nop
+							on
+									cd_nop.nop = vd_pedido.nop
+									and
+									cd_nop.tp_nota_fiscal <> 1
+									and
+									cd_nop.ind_baixa_estoque = 1
+							inner join sg_colaborador
+							on
+									sg_colaborador.cod_colaborador = vd_pedido.cod_colaborador
+					WHERE
+							vd_pedido_item_aberto.cod_produto = eq_saldo.cod_produto
+					) as demanda
+					from 
+						eq_saldo
+						inner join eq_deposito
+						ON
+							eq_deposito.cod_empresa = eq_saldo.cod_empresa
+							and
+							eq_deposito.cod_deposito = eq_saldo.cod_deposito
+					where 
+						eq_saldo.cod_empresa in ( empresa1, empresa2, empresa3 )
+						and 
+						eq_saldo.cod_deposito in ( deposito1, deposito2, deposito3, deposito4 )
+						and 
+						eq_deposito.consulta_saldo = '1' 
+					group by eq_saldo.cod_produto
+			 ) as worktable 
+				on 
+				worktable.cod_produto = cd_produto.cod_produto
+			where 
+					cd_produto.cod_produto_ecommerce is not null
+					and
+					cd_produto.ind_ecommerce = '1';
+
+	-- Definição da variável de controle de looping do cursor
+	DECLARE CONTINUE HANDLER FOR NOT FOUND SET existe_mais_linhas = 1;
+
+	-- Abertura do cursor
+	OPEN cursorEstoque;
+
+	-- Looping de execução do cursor
+	estoqueLoop: LOOP
+		
+			FETCH cursorEstoque INTO vCD_PRODUTO, vID_SKU , vSALDO;
+
+			-- Controle de existir mais registros na tabela
+			IF existe_mais_linhas = 1 THEN
+					LEAVE estoqueLoop;
+			END IF;
+
+			SET vCD_PRODUTO_ANT = null;
+			SET vSALDO_ANT 			= null;
+
+			select wk_estoque_ecommerce.cod_produto, wk_estoque_ecommerce.saldo_estoque into vCD_PRODUTO_ANT, vSALDO_ANT  from wk_estoque_ecommerce WHERE cod_produto = vCD_PRODUTO;
+			
+			SET existe_mais_linhas = 0;
+
+			-- Verifica se o produto existe, se não existir inclui o produto no estoque com seu devido saldo encontrado.
+			IF vCD_PRODUTO_ANT IS NULL THEN
+					INSERT INTO wk_estoque_ecommerce ( cod_produto, saldo_estoque, dt_ultima_atualizacao ) values ( vCD_PRODUTO, vSALDO, null );
+			END IF;
+
+			-- Verifica se o produto existe e se o saldo mudou, se mudou altera o saldo e remove a data da última atualização
+			IF vCD_PRODUTO_ANT IS NOT NULL AND vSALDO <> vSALDO_ANT THEN
+					UPDATE wk_estoque_ecommerce SET  saldo_estoque = vSALDO , dt_ultima_atualizacao = null where cod_produto = vCD_PRODUTO;
+			END IF;
+
+			-- Retorna para a primeira linha do loop
+	END LOOP estoqueLoop;
+
+	CLOSE cursorEstoque;
+	
+END
+$$
+
+delimiter //
+CREATE FUNCTION calcularJurosReceber( codEmpresa integer, codTitulo bigint(20) , codParcela integer, pSerie char(5) , dataReferencia date , retornaSaldo char) RETURNS decimal(17,2)
+BEGIN
+		declare  vlMulta               decimal(17,2);
+		declare  vlJuros               decimal(17,2);
+		declare  tarifaBoleto          decimal(17,2);
+		declare  vlTotalJurosMultaPont decimal(17,2);
+		declare  vlTitulo              decimal(17,2);
+        declare  vlBaixa               decimal(17,2);
+        declare  vlTituloMenosImpostos decimal(17,2);
+		declare  vlDesconto            decimal(17,2);
+		declare  percMulta             decimal(17,2);
+		declare  percJuros             decimal(17,8);
+		declare  vlSaldo 			   decimal(17,2);
+
+        declare  mesHoje               int;        
+        declare  anoHoje               int;        
+        declare  anoVenc               int;        
+              
+        declare diasAtraso             int;
+
+        declare  dataVencimento        date;     
+        declare  dataVencimentoOriginal date;   
+        declare  dataUltimaBaixa       date;        
+
+        declare  tpJuros               int;        
+
+		set vlMulta                    = 0.0;
+		set vlJuros                    = 0.0;
+		set tarifaBoleto               = 0.0;
+		set vlTotalJurosMultaPont      = 0.0;
+		set vlTitulo                   = 0.0;
+        set vlBaixa                    = 0.0;
+        set vlTituloMenosImpostos      = 0.0;
+		set vlDesconto                 = 0.0;
+		set percMulta                  = 0.0;
+		set percJuros                  = 0.0;
+		set vlSaldo					   = 0.0;
+        set tpJuros                    = 0;
+	
+        SELECT         
+             ifnull(fn_titulo_receber.vl_desconto ,0.0)       as vlDesconto, 
+             ifnull(fn_titulo_receber.perc_multa,0.0)         as percMulta,     
+             ifnulL(fn_titulo_receber.perc_juros,0.0)         as percJuros,           
+             getValorBaixaContasReceber
+             		( 
+             			fn_titulo_receber.cod_empresa, 
+             			fn_titulo_receber.cod_titulo, 
+             			fn_titulo_receber.cod_parcela , 
+             			fn_titulo_receber.serie , 
+             			now()
+             		)  							as vlBaixa,
+             ( fn_titulo_receber.vl_total_titulo + ifnull( fn_titulo_receber.taxa_boleto , 0 ) )    as vlTitulo,   
+             ( fn_titulo_receber.vl_total_titulo + ifnull( fn_titulo_receber.taxa_boleto , 0 ) ) - 
+             		( ifnull(  fn_titulo_receber.vl_iss , 0 ) 
+                    	+ ifnull(fn_titulo_receber.vl_ir,0) 
+                        + ifnull( fn_titulo_receber.vl_pis, 0 ) 
+                        + ifnull( fn_titulo_receber.vl_cofins , 0 ) 
+                        + ifnull( fn_titulo_receber.vl_cs , 0 ) 
+			+ ifnull( fn_titulo_receber.vl_inss, 0 ) 
+                    )							as vlTituloMenosImpostos,     
+             ifnull( fn_titulo_receber.tp_juros , 0 )     
+                                                as tpJuros,                                        
+             ifnull( fn_titulo_receber.taxa_boleto , 0 )     
+                                                as tarifaBoleto,
+             
+             getDtVencimentoFeriado(fn_titulo_receber.dt_vencimento)      
+                                                as dtVencimento,
+             fn_titulo_receber.dt_vencimento as dtVencimentoOriginal,
+    		 (
+    		 	select max(hist.dt_referencia) 
+    			from fn_titulo_receber_hist as hist 
+    			where 
+    				hist.cod_empresa     = fn_titulo_receber.cod_empresa 
+    				and 
+    				hist.cod_titulo      = fn_titulo_receber.cod_titulo 
+    				and 
+    				hist.cod_parcela     = fn_titulo_receber.cod_parcela 
+    				and 
+    				hist.serie           = fn_titulo_receber.serie 
+    				and 
+    				hist.tp_hist         = 30     
+              )              				  as dtUltimaBaixa
+        INTO                
+                    vlDesconto,                    
+                    percMulta,                    
+                    percJuros,             
+                    vlBaixa,              
+                    vlTitulo,                    
+                    vlTituloMenosImpostos,                    
+                    tpJuros,     
+                    tarifaBoleto,               
+                    dataVencimento,
+                    dataVencimentoOriginal,
+                    dataUltimaBaixa
+        FROM 
+              fn_titulo_receber
+        WHERE         
+              fn_titulo_receber.cod_empresa       = codEmpresa              
+              and
+              fn_titulo_receber.cod_titulo        = codTitulo                     
+              and               
+              fn_titulo_receber.cod_parcela       = codParcela              
+              and              
+              fn_titulo_receber.serie             = pSerie;
+
+
+
+     
+     IF( DATE_FORMAT(dataReferencia, '%Y-%m-%d') != DATE_FORMAT(dataVencimento, '%Y-%m-%d') ) THEN     
+         SET dataVencimento = dataVencimentoOriginal;
+     END IF;
+     
+
+     
+     IF ( dataVencimento is null ) THEN 
+        return 0.0;
+     END IF;  
+
+
+     set vlSaldo = vlTituloMenosImpostos;
+
+     
+     IF ( vlSaldo < 0 OR DATE_FORMAT(dataReferencia, '%Y-%m-%d') <= DATE_FORMAT(dataVencimento, '%Y-%m-%d') ) THEN     
+        
+        IF ( ifnull(vlBaixa,0) = 0 ) THEN        
+           IF( retornaSaldo = '1' ) THEN
+        	return  ifnull(vlSaldo,0) - ifnull(vlDesconto,0); 
+	   END IF;
+	   return 0.0;
+        ELSE
+            return vlSaldo;            
+        END IF;
+     END IF;
+ 
+          
+     IF ( vlSaldo <= 0 AND DATE_FORMAT(ifnull(dataUltimaBaixa,dataVencimento), '%Y-%m-%d') <= DATE_FORMAT(dataVencimento, '%Y-%m-%d')  ) THEN
+         return  vlSaldo;
+     END IF;
+
+     
+     
+     IF ( dataUltimaBaixa != null ) THEN
+        IF ( dataUltimaBaixa > dataVencimento ) THEN   
+           set dataReferencia = dataUltimaBaixa ;           
+        END IF;
+     END IF;     
+
+     
+     IF ( tpJuros = 0 ) THEN 
+         set diasAtraso = DATEDIFF(dataReferencia,dataVencimento);
+         set vlJuros = ( vlSaldo + tarifaBoleto ) * percJuros;     
+         set vlJuros = vlJuros * diasAtraso;     
+     END IF;          
+     
+     IF ( tpJuros = 1 ) THEN      
+        
+        set mesHoje = month(dataReferencia);
+        set anoHoje = year(dataReferencia);
+        set anoVenc = year(dataVencimento);
+
+        set diasAtraso = timestampdiff(month, dataVencimento, dataReferencia ) + 1;
+
+        set vlJuros = ( vlSaldo + tarifaBoleto ) * percJuros;     
+        set vlJuros = vlJuros * diasAtraso;  
+        
+     END IF;
+     
+     set vlMulta = ( vlSaldo + tarifaBoleto ) * percMulta;
+
+     IF ( ( ifnull(vlMulta,0) + ifnull(vlJuros,0) - ifnull(vlDesconto,0) ) IS NULL ) THEN 
+        IF( retornaSaldo = '1' ) THEN
+        	return vlSaldo;
+        END IF;
+        return 0.0;
+     END IF;
+
+    IF( retornaSaldo = '1' ) THEN
+    	return ifnull(vlSaldo,0) + ifnull(vlMulta,0) + ifnull(vlJuros,0) - ifnull(vlDesconto,0) - ifnull(vlBaixa, 0);
+    END IF;
+     
+     return ifnull(vlMulta,0) + ifnull(vlJuros,0) - ifnull(vlDesconto,0);
+END
+
+//
+
+
+CREATE FUNCTION calcularJurosPagar( codEmpresa integer, codTitulo bigint(20) , codParcela integer, codFornecedor integer , codEspecie integer , dataReferencia date , retornaSaldo char) RETURNS decimal(17,2)
+BEGIN
+		declare  vlMulta               decimal(17,2);
+		declare  vlJuros               decimal(17,2);
+		declare  tarifaBoleto          decimal(17,2);
+		declare  vlTotalJurosMultaPont decimal(17,2);
+		declare  vlTitulo              decimal(17,2);
+        declare  vlBaixa               decimal(17,2);
+        declare  vlTituloMenosImpostos decimal(17,2);
+		declare  vlDesconto            decimal(17,2);
+		declare  percMulta             decimal(17,2);
+		declare  percJuros             decimal(17,8);
+		declare  vlSaldo 			   decimal(17,2);
+		declare vlCotacao decimal(16,4);
+
+        declare  mesHoje               int;        
+        declare  anoHoje               int;        
+        declare  anoVenc               int;        
+              
+        declare diasAtraso             int;
+
+        declare  dataVencimento        date;
+        declare  dataVencimentoOriginal date;
+        declare  dataUltimaBaixa       date;
+
+        declare  tpJuros               int;        
+
+		set vlMulta                    = 0.0;
+		set vlJuros                    = 0.0;
+		set tarifaBoleto               = 0.0;
+		set vlTotalJurosMultaPont      = 0.0;
+		set vlTitulo                   = 0.0;
+        set vlBaixa                    = 0.0;
+        set vlTituloMenosImpostos      = 0.0;
+		set vlDesconto                 = 0.0;
+		set percMulta                  = 0.0;
+		set percJuros                  = 0.0;
+		set vlSaldo					   = 0.0;
+        set tpJuros                    = 0;
+
+	SELECT getVlCotacao( codEmpresa, codTitulo, codParcela, codFornecedor, codEspecie ) INTO vlCotacao;
+
+        SELECT         
+             ifnull(fn_titulo_pagar.vl_desconto ,0.0)       as vlDesconto, 
+             ifnull(fn_titulo_pagar.perc_multa,0.0)         as percMulta,     
+             ifnulL(fn_titulo_pagar.perc_juros,0.0)         as percJuros,           
+             getValorBaixaContasPagar
+             		( 
+             			fn_titulo_pagar.cod_empresa, 
+             			fn_titulo_pagar.cod_titulo, 
+             			fn_titulo_pagar.cod_parcela , 
+             			fn_titulo_pagar.cod_fornecedor , 
+             			fn_titulo_pagar.cod_especie , 
+             			now()
+             		)  							as vlBaixa,
+             fn_titulo_pagar.vl_total_titulo    as vlTitulo,   
+             fn_titulo_pagar.vl_total_titulo - 
+             		( ifnull(  fn_titulo_pagar.vl_iss , 0 ) 
+                    	+ ifnull(fn_titulo_pagar.vl_ir,0) 
+                        + ifnull( fn_titulo_pagar.vl_pis, 0 ) 
+                        + ifnull( fn_titulo_pagar.vl_cofins , 0 ) 
+                        + ifnull( fn_titulo_pagar.vl_cs , 0 ) 
+                    )							as vlTituloMenosImpostos,     
+             ifnull( fn_titulo_pagar.tp_juros , 0 )     
+                                                as tpJuros,                                        
+             ifnull( fn_titulo_pagar.taxa_boleto , 0 )     
+                                                as tarifaBoleto,
+             
+             getDtVencimentoFeriado(fn_titulo_pagar.dt_vencimento)      
+                                                as dtVencimento,                                                
+    		 fn_titulo_pagar.dt_vencimento as dtVencimentoOriginal,
+             (
+    		 	select max(hist.dt_referencia) 
+    			from fn_titulo_pagar_hist as hist 
+    			where 
+			           hist.cod_empresa     = fn_titulo_pagar.cod_empresa 
+			           and 
+			           hist.cod_titulo      = fn_titulo_pagar.cod_titulo 
+			           and 
+			           hist.cod_parcela     = fn_titulo_pagar.cod_parcela 
+			           and 
+			           hist.cod_fornecedor  = fn_titulo_pagar.cod_fornecedor 
+			           and 
+			           hist.cod_especie     = fn_titulo_pagar.cod_especie 
+    				   and 
+    				   hist.tp_hist         = 30 
+              )              					as dtUltimaBaixa
+        INTO                
+                    vlDesconto,                    
+                    percMulta,                    
+                    percJuros,             
+                    vlBaixa,              
+                    vlTitulo,                    
+                    vlTituloMenosImpostos,                    
+                    tpJuros,     
+                    tarifaBoleto,               
+                    dataVencimento,
+                    dataVencimentoOriginal,
+                    dataUltimaBaixa
+        FROM 
+              fn_titulo_pagar      
+        WHERE         
+              fn_titulo_pagar.cod_empresa       = codEmpresa              
+              and
+              fn_titulo_pagar.cod_titulo        = codTitulo                     
+              and               
+              fn_titulo_pagar.cod_parcela       = codParcela              
+              and              
+              fn_titulo_pagar.cod_fornecedor    = codFornecedor
+              and               
+              fn_titulo_pagar.cod_especie       = codEspecie;
+
+
+     IF ( DATE_FORMAT(dataReferencia, '%Y-%m-%d') != DATE_FORMAT(dataVencimento, '%Y-%m-%d') ) THEN     
+        SET dataVencimento = dataVencimentoOriginal;
+     END IF;
+
+     
+     IF ( dataVencimento is null ) THEN 
+        return 0.0;
+     END IF;  
+
+
+     set vlSaldo = vlTituloMenosImpostos;
+
+     
+     IF ( vlSaldo < 0 OR DATE_FORMAT(dataReferencia, '%Y-%m-%d') <= DATE_FORMAT(dataVencimento, '%Y-%m-%d') ) THEN     
+        
+        IF ( ifnull(vlBaixa,0) = 0 ) THEN        
+           IF( retornaSaldo = '1' ) THEN
+        	return  ( vlSaldo - vlDesconto ) * vlCotacao; 
+	   END IF;
+	   return 0.0;
+        ELSE
+            return vlSaldo * vlCotacao;            
+        END IF;
+     END IF;
+ 
+          
+     IF ( vlSaldo <= 0 AND DATE_FORMAT(ifnull(dataUltimaBaixa,dataVencimento), '%Y-%m-%d') <= DATE_FORMAT(dataVencimento, '%Y-%m-%d')  ) THEN
+         return  vlSaldo * vlCotacao;
+     END IF;
+
+     
+     
+     IF ( dataUltimaBaixa != null ) THEN
+        IF ( dataUltimaBaixa > dataVencimento ) THEN   
+           set dataReferencia = dataUltimaBaixa ;           
+        END IF;
+     END IF;     
+
+     
+     IF ( tpJuros = 0 ) THEN 
+         set diasAtraso = DATEDIFF(dataReferencia,dataVencimento);
+         set vlJuros = ( vlSaldo + tarifaBoleto ) * percJuros;     
+         set vlJuros = vlJuros * diasAtraso;     
+     END IF;          
+     
+     IF ( tpJuros = 1 ) THEN      
+        
+        set mesHoje = month(dataReferencia);
+        set anoHoje = year(dataReferencia);
+        set anoVenc = year(dataVencimento);
+
+        set diasAtraso = timestampdiff(month, dataVencimento, dataReferencia ) + 1;
+
+        set vlJuros = ( vlSaldo + tarifaBoleto ) * percJuros;     
+        set vlJuros = vlJuros * diasAtraso;  
+        
+     END IF;
+     
+     set vlMulta = ( vlSaldo + tarifaBoleto ) * percMulta;
+
+     IF ( ( vlMulta + vlJuros - vlDesconto ) IS NULL ) THEN 
+        IF( retornaSaldo = '1' ) THEN
+        	return vlSaldo * vlCotacao;
+        END IF;
+        return 0.0;
+     END IF;
+
+    IF( retornaSaldo = '1' ) THEN
+    	return (vlSaldo + ifnull(vlMulta,0) + ifnull(vlJuros,0) - ifnull(vlDesconto,0) - ifnull(vlBaixa,0)) * ifnull(vlCotacao, 1);
+    END IF;
+     
+     return (ifnull(vlMulta,0) + ifnull(vlJuros,0) - ifnull(vlDesconto,0)) * ifnull(vlCotacao,1);
+END
+
+//
+delimiter ;
+
+DELIMITER //
+
+CREATE FUNCTION getBaixaTituloContasPagar( vCodEmpresa int, vCodTitulo int, vCodParcela int, vCodFornecedor int, vCodEspecie int , vDtPagtoInicio varchar(20) , vDtPagtoFim varchar(20)) 
+RETURNS decimal(17,2)
+DETERMINISTIC
+READS SQL DATA
+BEGIN
+		declare  vlBaixa               decimal(17,2);
+
+		select 
+			sum(hist.vl_baixa)
+		into 
+				vlBaixa
+		from 
+				fn_titulo_pagar_hist hist
+				inner join fn_titulo_pagar
+				on
+						hist.cod_empresa = fn_titulo_pagar.cod_empresa
+						AND
+						hist.cod_titulo = fn_titulo_pagar.cod_titulo
+						AND
+						hist.cod_parcela = fn_titulo_pagar.cod_parcela
+						AND
+						hist.cod_fornecedor = fn_titulo_pagar.cod_fornecedor
+						AND
+						hist.cod_especie = fn_titulo_pagar.cod_especie
+		where
+				hist.cod_empresa 		= vCodEmpresa
+				AND
+				hist.cod_titulo 		= vCodTitulo
+				AND
+				hist.cod_parcela 		= vCodParcela
+				AND
+				hist.cod_fornecedor = vCodFornecedor
+				AND
+				hist.cod_especie 		= vCodEspecie
+				AND
+				hist.tp_hist 				= 30
+				and
+				hist.dt_referencia between vDtPagtoInicio and vDtPagtoFim
+		;
+
+			IF ( vlBaixa IS NULL ) THEN         
+				 return 0.0;     
+			END IF;
+
+			return vlBaixa;
+end //
+
+CREATE FUNCTION getBaixaTituloContasReceber( vCodEmpresa int, vCodTitulo int, vCodParcela int , vSerie varchar(3), vTpHist int , vDtPagtoInicio varchar(20) , vDtPagtoFim varchar(20)) 
+RETURNS decimal(17,2)
+DETERMINISTIC
+READS SQL DATA
+BEGIN
+		declare  vlBaixa               decimal(17,2);
+
+
+		select sum(fn_titulo_receber_hist.vl_baixa)
+		into 
+				vlBaixa
+		from 
+				fn_titulo_receber_hist 
+				inner join fn_titulo_receber
+				ON		
+						fn_titulo_receber.cod_empresa = fn_titulo_receber_hist.cod_empresa
+						AND
+						fn_titulo_receber.cod_titulo  = fn_titulo_receber_hist.cod_titulo
+						and 
+						fn_titulo_receber.cod_parcela = fn_titulo_receber_hist.cod_parcela
+						and 
+						fn_titulo_receber.serie = fn_titulo_receber_hist.serie
+		where 
+				fn_titulo_receber_hist.cod_empresa = vCodEmpresa 
+				and 
+				fn_titulo_receber_hist.cod_titulo = vCodTitulo 
+				and
+				fn_titulo_receber.cod_parcela = vCodParcela
+				and
+				fn_titulo_receber.serie = vSerie
+				and 
+				fn_titulo_receber_hist.tp_hist = vTpHist 
+				and
+				fn_titulo_receber_hist.dt_referencia 	between vDtPagtoInicio and vDtPagtoFim;
+
+			IF ( vlBaixa IS NULL ) THEN         
+				 return 0.0;     
+			END IF;
+
+			return vlBaixa;
+end //
+
+DELIMITER //
+
+CREATE FUNCTION getVlCotacao( codEmpresa integer, codTitulo bigint(20) , codParcela integer, codFornecedor integer , codEspecie integer ) RETURNS decimal(16,4)
+    DETERMINISTIC
+    READS SQL DATA
+BEGIN
+	declare retorno decimal(16,4);
+	declare moeda char;
+	declare moeda_titulo char;
+
+        set retorno = 1.0;
+        set moeda = 'R$';
+	set moeda_titulo = 'R$';
+	
+        SELECT moeda 
+	INTO moeda_titulo 
+	FROM fn_titulo_pagar 
+	WHERE cod_empresa = codEmpresa AND 
+	cod_titulo = codTitulo AND 
+	cod_parcela = codParcela AND 
+	cod_fornecedor = codFornecedor AND 
+	cod_especie = codEspecie ;
+
+        SELECT IFNULL(cd_param_empresa.valor, cd_parametro.def_valor) 
+	INTO moeda 
+	FROM cd_parametro LEFT JOIN cd_param_empresa ON ( cd_param_empresa.nome_param = cd_parametro.nome_param AND cd_param_empresa.cod_empresa = codEmpresa ) 
+	WHERE cd_parametro.nome_param = 'moedaPadrao' ;
+
+	IF( moeda != moeda_titulo ) THEN
+	    SELECT IFNULL( vl_cotacao, 1 ) INTO retorno FROM cd_moeda_cotacao WHERE moeda = moeda_titulo AND dt_cotacao <= NOW() ORDER BY dt_cotacao DESC LIMIT 1;
+	END IF;
+
+	return retorno;
+    	
+END//
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE FUNCTION atualizaCcusto(
+	ccustoAntigo varchar(30),
+	ccustoNovo varchar(30)
+)
+RETURNS varchar(30) CHARSET latin1
+LANGUAGE SQL
+DETERMINISTIC
+CONTAINS SQL
+SQL SECURITY DEFINER
+COMMENT ''
+BEGIN
+SET FOREIGN_KEY_CHECKS = 0;
+
+UPDATE cc_pedido set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE cc_pedido_item set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE cc_requisicao set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE eq_recebimento set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE eq_recebimento_item set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE eq_requisicao set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE fn_apontamento set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE fn_centro_custo_colaborador set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE fn_orcamento set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE fn_periodo_contabil set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE oc_ocorrencia set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE sv_plano_servico set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE vd_pedido set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE sg_colaborador set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+UPDATE fn_extrato_historico set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+
+UPDATE IGNORE fn_plano_conta_ccusto set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+DELETE FROM fn_titulo_receber_rateio where ccusto = ccustoAntigo;
+
+UPDATE fn_titulo_pagar set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+
+DROP TEMPORARY TABLE IF EXISTS tRateioCP; 
+CREATE TEMPORARY TABLE tRateioCP ENGINE=MyISAM ( 
+select cod_empresa, cod_titulo, cod_especie, cod_parcela, cod_fornecedor, ccusto, perc_rateio as percRateioAntigo
+from fn_titulo_pagar_rateio
+where ccusto = ccustoAntigo
+);
+
+update fn_titulo_pagar_rateio, tRateioCP
+SET fn_titulo_pagar_rateio.perc_rateio = fn_titulo_pagar_rateio.perc_rateio + tRateioCP.percRateioAntigo
+where 
+tRateioCP.cod_empresa = fn_titulo_pagar_rateio.cod_empresa and
+tRateioCP.cod_titulo = fn_titulo_pagar_rateio.cod_titulo and
+tRateioCP.cod_especie = fn_titulo_pagar_rateio.cod_especie and
+tRateioCP.cod_parcela = fn_titulo_pagar_rateio.cod_parcela and
+tRateioCP.cod_fornecedor = fn_titulo_pagar_rateio.cod_fornecedor and
+tRateioCP.ccusto = ccustoAntigo and
+fn_titulo_pagar_rateio.ccusto = ccustoNovo;
+
+UPDATE IGNORE fn_titulo_pagar_rateio set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+DELETE FROM fn_titulo_pagar_rateio where ccusto = ccustoAntigo;
+
+UPDATE fn_titulo_receber set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+
+DROP TEMPORARY TABLE IF EXISTS tRateioCR; 
+CREATE TEMPORARY TABLE tRateioCR ENGINE=MyISAM ( 
+select cod_empresa, cod_titulo, cod_parcela, serie, ccusto, perc_rateio as percRateioAntigo
+from fn_titulo_receber_rateio
+where ccusto = ccustoAntigo
+);
+
+update fn_titulo_receber_rateio, tRateioCR
+SET fn_titulo_receber_rateio.perc_rateio = fn_titulo_receber_rateio.perc_rateio + tRateioCR.percRateioAntigo
+where 
+tRateioCR.cod_empresa = fn_titulo_receber_rateio.cod_empresa and
+tRateioCR.cod_titulo = fn_titulo_receber_rateio.cod_titulo and
+tRateioCR.serie = fn_titulo_receber_rateio.serie and
+tRateioCR.cod_parcela = fn_titulo_receber_rateio.cod_parcela and
+tRateioCR.ccusto = ccustoAntigo and
+fn_titulo_receber_rateio.ccusto = ccustoNovo;
+
+UPDATE IGNORE fn_titulo_receber_rateio set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+DELETE FROM fn_titulo_receber_rateio where ccusto = ccustoAntigo;
+
+UPDATE IGNORE fn_centro_custo set ccusto = ccustoNovo where ccusto = ccustoAntigo;
+
+SET FOREIGN_KEY_CHECKS = 1;
+
+  RETURN ccustoNovo;
+END //
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE FUNCTION `statusEstoqueProduto`(pcodEmpresa int, pcodProduto varchar(30), pqtdNecessaria double, pcodOperacao int) RETURNS varchar(255) CHARSET latin1
+    DETERMINISTIC
+BEGIN
+
+DECLARE Retorno varchar(255) default "";
+DECLARE totalEstruturaProducao int;
+
+SET totalEstruturaProducao = (SELECT COUNT(*) FROM en_produto_estrutura
+								WHERE cod_produto_pai = pcodProduto and cod_operacao = pcodOperacao
+								LIMIT 5);
+        
+
+IF (totalEstruturaProducao = 0) 
+THEN 
+   	SET Retorno = 'Disponível';
+
+
+ELSE
+
+	
+	CREATE TEMPORARY TABLE tempMateriasPrimas
+		(codProduto char(30),
+		codMateriaPrima char(30),
+		qtd double,
+		qtdMateriaPrima double,
+		saldo double,
+		saldoAberto double);	
+
+	
+	INSERT INTO tempMateriasPrimas
+	    (codProduto, codMateriaPrima, qtd, qtdMateriaPrima, saldo, saldoAberto)
+	SELECT DISTINCT 	pcodProduto, 
+						en_produto_estrutura.cod_produto as codMateriaPrima, 
+						en_produto_estrutura.qtd,
+						0.0 as qtdMateriaPrima,
+						0.0 as saldo,
+						0.0 as saldoAberto
+	FROM en_produto_estrutura, cd_produto_empresa, cd_produto  
+	LEFT JOIN cd_familia_comercial ON ( cd_familia_comercial.cod_familia_comercial = cd_produto.cod_familia_comercial )  
+	WHERE 	en_produto_estrutura.cod_produto_pai = pcodProduto AND
+			en_produto_estrutura.cod_operacao = pcodOperacao AND
+			cd_produto.cod_produto = en_produto_estrutura.cod_produto  AND
+			cd_produto_empresa.cod_produto = cd_produto.cod_produto  AND
+			cd_produto_empresa.cod_empresa = pcodEmpresa AND
+            cd_produto.ind_fantasma <> 1;
+ 
+	
+    	UPDATE tempMateriasPrimas
+    	SET qtdMateriaPrima = qtd * pqtdNecessaria;
+
+	
+	CREATE TEMPORARY TABLE IF NOT EXISTS tempSaldo
+		SELECT eq_saldo.cod_produto, SUM( eq_saldo.saldo_estoque ) as saldo
+		FROM eq_saldo, eq_deposito, tempMateriasPrimas
+		WHERE eq_saldo.cod_empresa IN ( pcodEmpresa )  
+		AND eq_saldo.cod_produto =  tempMateriasPrimas.codMateriaPrima
+		AND eq_deposito.cod_empresa = eq_saldo.cod_empresa 
+		AND eq_deposito.cod_deposito = eq_saldo.cod_deposito  
+		AND eq_deposito.ind_producao = 1  
+		GROUP BY eq_saldo.cod_produto;
+    
+    	
+    	UPDATE tempMateriasPrimas
+		LEFT JOIN tempSaldo ON (tempMateriasPrimas.codMateriaPrima = tempSaldo.cod_produto)
+	SET tempMateriasPrimas.saldo = tempSaldo.saldo;
+    
+	
+    	CREATE TEMPORARY TABLE IF NOT EXISTS tempSaldoAberto
+		SELECT 	cod_produto, SUM(vd_pedido_item_aberto.qtd) as saldoAberto 
+		FROM 	vd_pedido_item_aberto, vd_pedido, cd_nop, tempMateriasPrimas
+		WHERE 	vd_pedido_item_aberto.cod_produto = tempMateriasPrimas.codMateriaPrima AND
+				vd_pedido_item_aberto.cod_empresa = pcodEmpresa AND
+				vd_pedido.cod_pedido = vd_pedido_item_aberto.cod_pedido AND
+				vd_pedido.cod_empresa = vd_pedido_item_aberto.cod_empresa AND
+				vd_pedido.situacao >= 20 AND
+				vd_pedido.situacao < 70 AND
+				cd_nop.nop = vd_pedido.nop AND
+				cd_nop.tp_nota_fiscal != 1 AND
+				cd_nop.ind_baixa_estoque = 1  
+		GROUP BY cod_produto;
+
+    	
+	UPDATE tempMateriasPrimas
+		LEFT JOIN tempSaldoAberto ON (tempMateriasPrimas.codProduto = tempSaldoAberto.cod_produto)
+	SET tempMateriasPrimas.saldoAberto = tempSaldoAberto.saldoAberto;
+
+	
+	UPDATE tempMateriasPrimas
+    	SET saldo = 0
+    	WHERE saldo is null;
+
+	
+	UPDATE tempMateriasPrimas
+	SET saldoAberto = 0
+    	WHERE saldoAberto is null;
+    
+    
+    IF (SELECT COUNT(*) FROM tempMateriasPrimas WHERE saldo < qtdMateriaPrima + saldoAberto) > 0 
+		THEN SET Retorno = 'Falta';
+    ELSE 
+		SET Retorno = 'Disponível';
+	END IF;
+
+    
+    DROP TEMPORARY TABLE tempSaldo;
+    DROP TEMPORARY TABLE tempSaldoAberto;
+    DROP TEMPORARY TABLE tempMateriasPrimas;
+
+END IF;
+
+RETURN (Retorno);
+
+END//
+
+DELIMITER ;
+
+DELIMITER //
+
+CREATE FUNCTION `listarNFPedidoCompra`(codEmpresa int, codProduto varchar(30), codPedidoCompra int) RETURNS varchar(255) CHARSET latin1
+    DETERMINISTIC
+BEGIN
+
+DECLARE listaNFAux varchar(255) default "";
+
+DECLARE listaNF varchar(255) default "";
+DECLARE existe_mais_linhas int default 0;
+
+DECLARE getNFs CURSOR FOR
+ 
+ 	SELECT 
+        CONCAT(eq_recebimento.nr_nota_fiscal, "/", eq_recebimento.serie)
+
+	FROM
+ 
+		eq_recebimento INNER JOIN eq_recebimento_item
+
+		ON (eq_recebimento.cod_documento = eq_recebimento_item.cod_documento AND
+
+		    eq_recebimento.cod_empresa = eq_recebimento_item.cod_empresa)
+
+	WHERE
+		eq_recebimento.cod_empresa = CodEmpresa AND
+	        eq_recebimento_item.cod_produto = CodProduto AND
+
+                eq_recebimento_item.cod_pedido_compra = CodPedidoCompra;
+
+
+DECLARE CONTINUE HANDLER FOR NOT FOUND SET existe_mais_linhas=1;
+
+
+OPEN getNFs;
+
+
+
+meuLoop: LOOP
+FETCH getNFs INTO listaNFAux;
+
+
+IF existe_mais_linhas = 1 THEN
+	LEAVE meuLoop;
+END IF;
+
+SET listaNF = CONCAT(listaNF, listaNFAux, ", ");
+
+END LOOP;
+
+
+IF length(trim(listaNF)) > 0 THEN
+	SET listaNF = substr(listaNF, 1, length(trim(listaNF)) - 1);
+END IF;
+
+RETURN (listaNF);
+
+END//
+
+DELIMITER ;
+
+
+
+DELIMITER //
+
+CREATE FUNCTION getNrBoleto() RETURNS int
+DETERMINISTIC
+BEGIN
+	
+	SET @retorno = (SELECT IFNULL(def_valor,0) + 1 FROM cd_parametro WHERE nome_param = 'nrBoleto' FOR UPDATE);
+	UPDATE cd_parametro SET def_valor=@retorno WHERE nome_param = 'nrBoleto';
+
+	RETURN @retorno;
+END//
+
+DELIMITER ;

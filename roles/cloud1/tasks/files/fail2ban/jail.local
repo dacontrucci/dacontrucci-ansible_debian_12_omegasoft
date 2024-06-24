@@ -1,0 +1,17 @@
+[DEFAULT]
+
+bantime  = -1
+findtime  = 3600
+maxretry = 3
+
+
+[mysqld-auth]
+
+ignoreip = 127.0.0.1/8
+mysql_log = /var/log/mysql/error.log
+enabled = true
+
+[sshd]
+
+ignoreip = 127.0.0.1/8
+enabled = true

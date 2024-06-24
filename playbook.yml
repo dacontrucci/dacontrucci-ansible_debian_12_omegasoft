@@ -1,0 +1,33 @@
+---
+- name:  Configura Servidor Padrao Cloud I
+  hosts: "{{ target }}"
+  roles:
+    - cloud1
+
+  tasks:
+    - import_tasks: roles/cloud1/tasks/unoerp.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/atualizador.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/backup.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/backup_incremental_mysql.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/sudoers.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/nrpe.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/fail2ban.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/hostname.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/logrotate.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/ssl_certificate.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/reboot.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+    - import_tasks: roles/cloud1/tasks/ufw.yml
+      when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "12")
+...
+

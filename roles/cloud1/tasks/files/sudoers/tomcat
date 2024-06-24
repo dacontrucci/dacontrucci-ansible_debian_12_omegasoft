@@ -1,0 +1,16 @@
+Defaults        env_reset
+Defaults        secure_path="/usr/sbin:/usr/bin:/bin"
+
+Cmnd_Alias       TOMCAT = /usr/sbin/service tomcat start, /usr/sbin/service tomcat stop, /usr/sbin/service tomcat status
+Cmnd_Alias       MYSQL = /usr/sbin/service mysql start, /usr/sbin/service mysql stop, /usr/sbin/service mysql status
+Cmnd_Alias       CUPS = /etc/init.d/cups
+Cmnd_Alias       SYSLOG = /usr/bin/tail -f /var/log/syslog
+Cmnd_Alias       TMP = /bin/rm /tmp/*
+Cmnd_Alias       ATUALIZADOR = /root/crontab/atualizador/atualizador.sh
+Cmnd_Alias       OPENSSL = /usr/bin/openssl
+Cmnd_Alias       KEYTOOL = /usr/java/jdk/bin/keytool
+Cmnd_Alias       COMANDOS = TOMCAT,CUPS,ATUALIZADOR,SYSLOG,TMP,ATUALIZADOR,OPENSSL,KEYTOOL,MYSQL
+
+
+%unosol         ALL = (root) NOPASSWD: COMANDOS
+

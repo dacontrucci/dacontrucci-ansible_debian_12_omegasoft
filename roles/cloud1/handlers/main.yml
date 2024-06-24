@@ -1,0 +1,6 @@
+---
+- name: Apply Sysctl
+  command:
+    cmd: sysctl -p
+...
+# handlers file for cloud1

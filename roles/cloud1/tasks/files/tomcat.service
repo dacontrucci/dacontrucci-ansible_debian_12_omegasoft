@@ -1,0 +1,32 @@
+[Unit]
+Description=Apache Tomcat 8 - [UNO ERP]
+Wants=syslog.target network.target mysql.service
+After=syslog.target network.target mysql.service
+
+
+[Service]
+Type=forking
+
+Environment=JAVA_HOME=/usr/java/jdk
+Environment=CATALINA_HOME=/var/tomcat
+Environment=CATALINA_BASE=/var/tomcat
+Environment=CATALINA_PID=/var/tomcat/temp/tomcat.pid
+Environment='CATALINA_OPTS=-server -Xms256M -Xmx650M -XX:ReservedCodeCacheSize=32m -XX:MetaspaceSize=128m -XX:MaxMetaspaceSize=512m -XX:+UseG1GC -XX:+CMSClassUnloadingEnabled -Xss256k -XX:CompressedClassSpaceSize=64m -XX:+UseCompressedOops -XX:+UseCompressedClassPointers -XX:+UseCodeCacheFlushing'
+Environment='JAVA_OPTS=-Djava.awt.headless=true -Djava.security.egd=file:/dev/./urandom'
+
+WorkingDirectory=/var/tomcat/bin
+
+ExecStart=/var/tomcat/bin/startup.sh
+ExecStop=/var/tomcat/bin/shutdown.sh
+
+PIDFile=/var/tomcat/temp/tomcat.pid
+
+
+User=tomcat
+Group=tomcat
+UMask=0007
+RestartSec=10
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

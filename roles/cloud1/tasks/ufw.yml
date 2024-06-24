@@ -1,0 +1,52 @@
+- name: UFW | Set default deny for incoming traffic
+  ufw:
+   state: reset
+   default: deny
+   direction: incoming
+   
+- name: UFW | Set default allow for outgoing traffic
+  ufw:
+   default: allow
+   direction: outgoing
+   
+- name: UFW | Allow SSH from specific IP
+  ufw:
+   rule: allow
+   from: 191.255.216.172
+   port: '22'
+   proto: tcp
+   
+- name: UFW | Allow MySQL from specific IP
+  ufw:
+   rule: allow
+   from: 191.255.216.172
+   port: '3306'
+   proto: tcp
+   
+- name: UFW | Allow NRPE from specific IP
+  ufw:
+   rule: allow
+   from: 191.255.216.172
+   port: '5666'
+   proto: tcp
+
+- name: UFW | Allow HTTP 
+  ufw:
+   rule: allow
+   port: '80'
+   proto: tcp
+
+- name: UFW | Allow HTTPS
+  ufw:
+   rule: allow
+   port: '443'
+   proto: tcp
+   
+- name: UFW | Allow From Dvianne
+  ufw:
+   rule: allow
+   from: '187.11.206.234'
+
+- name: UFW | Enable the Firewall
+  ufw:
+   state: enabled

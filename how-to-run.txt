@@ -1,0 +1,3 @@
+###Essa forma de execucao limita os hosts a serem utilizados pela playbook evitando que seja rodada para todos os servidores.
+
+ansible-playbook -i '<TARGET-HOST-HERE>,' -e "{target: <TARGET-HOST-HERE>}" playbook.yml -e 'app_name=app' -e @roles/cloud1/vars/main.yml --ask-vault-pass -b

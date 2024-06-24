@@ -1,0 +1,19 @@
+- name: UNOERP | Copy atualizador.sh Sctipt File
+  copy:
+    src: atualizador/atualizador.sh
+    dest: /root/crontab/atualizador/
+    owner: root
+    group: root
+    mode: '700'
+    directory_mode: '700'
+
+- name: UNOERP | Add cronjob
+  cron:
+    name: "Atualizador"
+    minute: "0"
+    hour: "0"
+    job: "/root/crontab/atualizador/atualizador.sh > /dev/null"
+    cron_file: /etc/crontab
+    user: root
+    backup: yes
+

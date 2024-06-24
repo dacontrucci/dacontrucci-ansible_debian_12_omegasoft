@@ -1,0 +1,19 @@
+---
+- name: SISOP | Change sources list.
+  shell:
+    cmd: sed -i 's/stretch/buster/g' /etc/apt/sources.list
+    executable: /bin/bash
+  when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "9")
+
+
+- name: APT | Upgrade Distro from Debian 9 (Stretch) to Debian 10 (Buster)
+  apt:
+    update_cache=yes
+    upgrade=dist
+    autoremove=yes
+    autoclean=yes
+  when: (ansible_facts['distribution'] == "Debian" and ansible_facts['distribution_major_version'] == "9")
+  
+- name: SISOP | Reboot the system
+  reboot:
+...
