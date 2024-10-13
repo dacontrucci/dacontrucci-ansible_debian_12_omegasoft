@@ -14,7 +14,6 @@
     minute: "0"
     hour: "*/1"
     job: "/root/crontab/bkp_inc_mysql.sh {{ app_name|lower }} > /dev/null"
-    cron_file: /etc/crontab
     user: root
     backup: yes
 

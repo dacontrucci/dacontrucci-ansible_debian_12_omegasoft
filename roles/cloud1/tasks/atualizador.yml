@@ -13,7 +13,6 @@
     minute: "0"
     hour: "0"
     job: "/root/crontab/atualizador/atualizador.sh > /dev/null"
-    cron_file: /etc/crontab
     user: root
     backup: yes
 
